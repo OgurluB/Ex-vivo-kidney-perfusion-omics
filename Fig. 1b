@@ -9,13 +9,14 @@ library(factoextra)
 library(readxl)
 library(pROC)
 
-## Load data
+## Load data - samples in rows and metabolites in columns
 metabolomics_data <- read_xlsx("/Users/baranogurlu/Library/CloudStorage/OneDrive-UMCG/MD-PhD/Metabolomics/Results/Metabolon imputed/Metabolon imputed data.xlsx")
 
+## select the rows of the samples/groups that you want to compare
 hmp_minimal_df <- data.frame(metabolomics_data[31:60,])
 hmp_severe_df <- data.frame(metabolomics_data[121:150,])
 
-# A data.frame to summarize the results
+# Create a data.frame to summarize the results
 hmm_severe_vs_minimal <- data.frame(
   Metabolite = names(hmp_minimal_df)[-c(1,2)],
   P_Value = rep(NA, 926),
