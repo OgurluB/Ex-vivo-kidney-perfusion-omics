@@ -1,0 +1,266 @@
+# Load required packages
+library(readxl)
+library(dplyr)
+library(parallel)
+library(writexl)
+library(readr)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(AnnotationDbi)
+library(tidyr)
+library(pheatmap)
+
+# Set the working directory
+setwd("/Users/baranogurlu/Library/CloudStorage/OneDrive-UMCG/Multi-omics - shared/Metabolomics/Statistics and figures/Ex vivo vs in vivo/GMI")
+
+# Load data
+NAD <- read_xlsx("NAD_for_correlation.xlsx")
+NAD_df <- data.frame(NAD) 
+
+protein <- read_xlsx("/Users/baranogurlu/Library/CloudStorage/OneDrive-UMCG/Multi-omics - shared/Metabolomics/Statistics and figures/Ex vivo vs in vivo/Protein/Proteomics Ex vs In.xlsx")
+protein_df <- data.frame(protein)
+
+mrnas <- read_xlsx("/Users/baranogurlu/Library/CloudStorage/OneDrive-UMCG/Multi-omics - shared/Metabolomics/Statistics and figures/Ex vivo vs in vivo/mRNA/mRNA Ex vs In.xlsx")
+mrnas_df <- data.frame(mrnas)
+
+# Prepare data frames
+NAD_df <- NAD_df[, 3:ncol(NAD_df)]
+protein_df <- protein_df[, 3:ncol(protein_df)]
+mrnas_df <- mrnas_df[, 3:ncol(mrnas_df)]
+
+port_mrna_df <- cbind(mrnas_df, protein_df)
+port_mrna_df <- data.frame(port_mrna_df)
+
+NAD_df <- data.frame(NAD_df)
+
+port_mrna_df[] <- lapply(port_mrna_df, function(x) as.numeric(as.character(x)))
+#sum(is.na(port_mrna_df))
+
+# Setup parallel environment
+no_cores <- detectCores() - 2
+cl <- makeCluster(no_cores)
+clusterExport(cl, varlist = c("NAD_df", "port_mrna_df", "cor.test"))
+clusterEvalQ(cl, library(stats))
+
+# Prepare pairs of metabolite and Protein_mRNA for parallel computation
+params <- expand.grid(metabolite = colnames(NAD_df), Protein_mRNA = colnames(port_mrna_df))
+
+# Function to calculate correlation for a pair
+calc_cor <- function(param) {
+  metabolite <- param$metabolite
+  Protein_mRNA <- param$Protein_mRNA
+  
+  if (any(is.na(NAD_df[[metabolite]])) || any(is.na(port_mrna_df[[Protein_mRNA]]))) {
+    return(NULL)
+  } else {
+    test_result <- cor.test(NAD_df[[metabolite]], port_mrna_df[[Protein_mRNA]], method = "spearman")
+    return(data.frame(Metabolite = metabolite, 
+                      Protein_mRNAs = Protein_mRNA, 
+                      Correlation = test_result$estimate, 
+                      P_Value = test_result$p.value))
+  }
+}
+
+# Run calculations in parallel
+results_list <- parLapply(cl, split(params, seq(nrow(params))), calc_cor)
+
+# Stop the parallel cluster
+stopCluster(cl)
+
+# Combine the results
+results_GMI <- do.call(rbind, results_list)
+
+# Remove 'NULL' entries
+results_GMI <- results_GMI[!sapply(results_GMI, is.null), ]
+
+results_GMI$P_Adjust <- p.adjust(results_GMI$P_Value, method = "BH")
+
+results_GMI$Significant <- results_GMI$P_Adjust < 0.05
+
+significant_GMIs <- results_GMI[results_GMI$Significant == TRUE, ]
+
+significant_GMIs <- data.frame(significant_GMIs)
+
+
+write_xlsx(significant_GMIs, "significant_results_GMI_PMI.xlsx")
+
+
+significant_GMIs <- read_xlsx("significant_results_GMI.xlsx")
+significant_GMIs <- data.frame(significant_GMIs)
+
+# Divide the signififcant results in positive and negative correlations
+significant_GMIs$Positive <- significant_GMIs$Correlation > 0
+significant_GMIs_pos <- significant_GMIs[significant_GMIs$Positive == TRUE, ]
+significant_GMIs_neg <- significant_GMIs[significant_GMIs$Positive == FALSE, ]
+
+
+### --------------------------------###
+## -- Start KEGG & GO Enrichment -- ##
+### --------------------------------###
+
+data <- significant_GMIs_pos
+
+# Initialize empty data frames for GO and KEGG results
+GO_df <- data.frame()
+KEGG_df <- data.frame()
+
+# Get the list of unique metabolites
+unique_metabolites <- unique(data$Metabolite)
+
+# Perform GO and KEGG analysis for each unique metabolite
+for (metabolite in unique_metabolites) {
+  # Extract all related Protein_mRNA names for this metabolite
+  Protein_mRNAs <- data$Protein_mRNAs[data$Metabolite == metabolite]
+  
+  # Convert Protein_mRNA names to Entrez IDs
+  entrez_ids <- bitr(Protein_mRNAs, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+  
+  # Filter out Protein_mRNAs that could not be converted
+  valid_entrez_ids <- entrez_ids$ENTREZID[!is.na(entrez_ids$ENTREZID)]
+  
+  # Skip this metabolite if there are no valid Entrez IDs
+  if (length(valid_entrez_ids) == 0) {
+    next
+  }
+  
+  # GO analysis
+  go_results <- enrichGO(gene = valid_entrez_ids,
+                         OrgDb = org.Hs.eg.db,
+                         keyType = "ENTREZID",
+                         ont = "ALL",
+                         pAdjustMethod = "BH",
+                         qvalueCutoff = 0.05)
+  
+  # KEGG analysis
+  kegg_results <- enrichKEGG(gene = valid_entrez_ids,
+                             organism = "hsa",
+                             keyType = "kegg",
+                             pAdjustMethod = "BH",
+                             qvalueCutoff = 0.05)
+  
+  # Convert S4 object to data frame
+  if (!is.null(go_results) && nrow(go_results) > 0) {
+    go_df <- as.data.frame(go_results)
+    go_df$Metabolite <- metabolite  # Add the metabolite name
+    GO_df <- rbind(GO_df, go_df)
+  }
+  
+  if (!is.null(kegg_results) && nrow(kegg_results) > 0) {
+    kegg_df <- as.data.frame(kegg_results)
+    kegg_df$Metabolite <- metabolite  # Add the metabolite name
+    KEGG_df <- rbind(KEGG_df, kegg_df)
+  }
+  
+  
+  # Print message indicating completion
+  print(paste("Completed analysis for", metabolite))
+}
+
+KEGG_df <- KEGG_df %>%
+  arrange(p.adjust)
+
+GO_df <- GO_df %>%
+  arrange(p.adjust)
+
+### --- End KEGG & GO --- ###
+
+setwd("/Users/baranogurlu/Library/CloudStorage/OneDrive-UMCG/Multi-omics - shared/Metabolomics/Statistics and figures/Ex vivo vs in vivo/GMI/KEGG results")
+write_xlsx(KEGG_df, "kegg_df_NAD_PMI_GMI_pos.xlsx")
+
+setwd("/Users/baranogurlu/Library/CloudStorage/OneDrive-UMCG/Multi-omics - shared/Metabolomics/Statistics and figures/Ex vivo vs in vivo/GMI/GO results")
+write_xlsx(GO_df, "go_df_NAD_PMI_GMI_pos.xlsx")
+
+
+
+
+##########################################
+### -- Data preparation for heatmap -- ###
+setwd("/Users/baranogurlu/Library/CloudStorage/OneDrive-UMCG/Multi-omics - shared/Metabolomics/Statistics and figures/Ex vivo vs in vivo/GMI/KEGG results/PMI - GMI")
+KEGG <- read_xlsx("PMI-GMI Ex vs In_pos2.xlsx")
+KEGG_df <- data.frame(KEGG)
+
+KEGG_df$NegLog_P_adjust <- -log10(KEGG_df$p.adjust)
+
+## Creating a new data frame 
+# Step 1: Get unique pathway names and metabolites
+unique_pathways <- unique(KEGG_df$Name)
+unique_metabolites <- unique(KEGG_df$Metabolite)
+
+# Step 2: Initialize Overview_df with 0's
+Overview_df <- expand.grid(Metabolite = unique_metabolites, Pathway = unique_pathways)
+Overview_df$NegLog_P_adjust <- 0  # Initialize all values to 0
+
+# Transform Overview_df to wide format for easy value assignment
+Overview_df_wide <- Overview_df %>%
+  pivot_wider(names_from = Pathway, values_from = NegLog_P_adjust, values_fill = list(NegLog_P_adjust = 0))
+
+# Step 3: Populate the dataframe
+for (row in 1:nrow(KEGG_df)) {
+  metabolite <- KEGG_df$Metabolite[row]
+  pathway <- KEGG_df$Name[row]
+  neg_log_p_adjust <- KEGG_df$NegLog_P_adjust[row]
+  
+  Overview_df_wide[Overview_df_wide$Metabolite == metabolite, pathway] <- neg_log_p_adjust
+}
+
+
+# Creating the new dataframe with unique descriptions and their first occurrence
+supp_mat_df <- KEGG_df %>%
+  distinct(Name, .keep_all = TRUE)
+
+#write_xlsx(supp_mat_df, "supp_mat_positive.xlsx")
+
+supp_mat_df <- read_xlsx("supp_mat_pos.xlsx")
+supp_mat_df <- data.frame(supp_mat_df)
+
+heatmap_data_df <- data.frame(Overview_df_wide)
+
+#write_xlsx(heatmap_data_df, "heatmap_tijdelijk_pos.xlsx")
+heatmap_data_df <- read_xlsx("heatmap_tijdelijk_pos.xlsx")
+heatmap_data_df <- data.frame(heatmap_data_df)
+
+meta_data_df <- supp_mat_df
+
+rownames_phmat <- heatmap_data_df$Metabolite
+
+phmat <- heatmap_data_df[2:ncol(heatmap_data_df)]
+rownames(phmat) <- rownames_phmat
+colnames_phmat <- read_xlsx("Colnames_pos.xlsx")
+colnames_phmat <- data.frame(colnames_phmat)
+colnames(phmat) <- colnames_phmat
+
+phmat_trans <- t(phmat)
+phmat_trans <- data.frame(phmat_trans)
+colnames(phmat_trans) <- "NAD+"
+
+# Create annot_col
+annot_col <- data.frame(meta_data_df$Group)
+colnames(annot_col)[1] <- "Pathway group"
+rownames(annot_col) <- meta_data_df$Name
+
+###########################
+## --> START HEATMAP <-- ##
+setwd("/Users/baranogurlu/Library/CloudStorage/OneDrive-UMCG/Multi-omics - shared/Metabolomics/Statistics and figures/Ex vivo vs in vivo/GMI/KEGG results/PMI - GMI")
+# Set up PDF output
+pdf("heatmap_PMI-GMI_positive_t_postfeedback.pdf", width=6.2, height = 10, bg = "white")
+
+## Heatmap
+ph <- phmat_trans %>% as.data.frame() %>% 
+  pheatmap(cluster_rows = F, cluster_cols = F, clustering_method = "ward.D2",
+           cutree_rows = 3, cutree_cols = 4,
+           annotation_row = annot_col,
+           annotation_colors = list(
+             'Pathway group'=c(
+               "Metabolism" = "lemonchiffon",
+               "Replication and repair" = "wheat3",
+               "Signal transduction" = "sienna2",
+               "Endocrine system" = "mediumorchid",
+               "Excretory system" = "goldenrod1"
+               )),
+           breaks = c(0,1.301,2,4,6,8,10),
+           color = c("white", "#CCCCCC", "#B2B2B2", "#999999", "#7F7F7F", "#5F5F5F"))
+
+
+
+
+dev.off()
