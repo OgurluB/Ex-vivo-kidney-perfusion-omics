@@ -4,7 +4,6 @@
 ## Load required packages
 library(dplyr)
 library(FactoMineR)
-library(ggplot2)
 library(factoextra)
 library(readxl)
 library(pROC)
