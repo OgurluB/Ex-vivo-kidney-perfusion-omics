@@ -9,7 +9,7 @@ setwd(".../path")
 set.seed(42)
 
 # Read data and extract relevant information
-data <- read_excel("Metabolon imputed data_bootstrap.xlsx", sheet = 1)
+data <- read_excel("file name.xlsx", sheet = 1)
 sample_names <- as.character(data[[1]])
 pig_ids <- as.character(data[[2]])
 labels <- as.numeric(data[[3]])
@@ -44,3 +44,5 @@ results <- lapply(b.list, function(x) {
 mean_aucs <- colMeans(do.call(rbind, results), na.rm = TRUE)
 results_df <- data.frame(Metabolite = colnames(metabolite_data), Mean_AUC = mean_aucs)
 results_df <- results_df[order(-results_df$Mean_AUC), ]
+
+## Re-run the script for all desired comparisons by modifying the data extraction step
