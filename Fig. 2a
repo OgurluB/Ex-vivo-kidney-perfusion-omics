@@ -1,5 +1,4 @@
-##########################################################################################################
-### --- Fig. 2a | Minimally injured kidneys ex vivo after 6 hours ex vivo warm perfusion compared to the same kidneys in vivo 
+### Fig. 2a, 2b, and 2c ###
 
 library(dplyr)
 library(FactoMineR)
@@ -8,9 +7,11 @@ library(factoextra)
 library(readxl)
 library(pROC)
 
-## Load data
+## Load metabolomics data
 metabolomics_data <- read_xlsx("...path/file name.xlsx")
 
+# Extract data for the desired comparison
+# We continue by extracting the data needed to create Fig. 2a. The script for creating Fig. 2b and 2c is similar to the following script, the only difference being the rows extracted and the comparison made 
 in_vivo_minimal_df <- data.frame(metabolomics_data[1:30,])
 post_warm_minimal_df <- data.frame(metabolomics_data[61:90,])
 
@@ -27,7 +28,6 @@ paired_t_test_Ex_vs_In_df <- data.frame(
 
 # Loop through the columns with the metabolites
 for (i in 3:ncol(post_warm_minimal_df)) {
-  # Controleer of er voldoende variatie is om een t-test uit te voeren
   if(sd(post_warm_minimal_df[[i]], na.rm = TRUE) > 0 && sd(in_vivo_minimal_df[[i]], na.rm = TRUE) > 0) {
     test_result <- t.test(post_warm_minimal_df[[i]], in_vivo_minimal_df[[i]], paired = TRUE)
     paired_t_test_Ex_vs_In_df$P_Value[i-2] <- test_result$p.value
@@ -35,7 +35,6 @@ for (i in 3:ncol(post_warm_minimal_df)) {
     paired_t_test_Ex_vs_In_df$CI_Lower[i-2] <- test_result$conf.int[1]
     paired_t_test_Ex_vs_In_df$CI_Upper[i-2] <- test_result$conf.int[2]
   } else {
-    # Vul NA in als er niet voldoende variatie is
     paired_t_test_Ex_vs_In_df$P_Value[i-2] <- NA
   }
 }
@@ -46,10 +45,6 @@ paired_t_test_Ex_vs_In_df$P_Adjust <- p.adjust(paired_t_test_Ex_vs_In_df$P_Value
 # Significant TRUE if P_Adjust < 0.05, otherwise FALSE
 paired_t_test_Ex_vs_In_df$Significant <- paired_t_test_Ex_vs_In_df$P_Adjust < 0.05
 
-
-# Count the number of metabolites that show a significant difference
-number_significant_Postsev_min <- sum(paired_t_test_Ex_vs_In_df$Significant, na.rm = TRUE)
-
 # Add a column that contains the means of the confidence intervals
 paired_t_test_Ex_vs_In_df$CI_Mean <- (paired_t_test_Ex_vs_In_df$CI_Lower + paired_t_test_Ex_vs_In_df$CI_Upper) / 2
 
@@ -58,27 +53,10 @@ paired_t_test_Ex_vs_In_df$Direction <- ifelse(paired_t_test_Ex_vs_In_df$Effect_S
 
 # Filter on significant values
 significant_changes <- paired_t_test_Ex_vs_In_df[paired_t_test_Ex_vs_In_df$Significant == TRUE, ]
-
 significant_changes_df <- data.frame(significant_changes)
 
-
-# Calculate AUC for each metabolite
-#auc_values <- sapply(3:ncol(post_warm_minimal_df), function(i) {
-  # Combine the values from both dataframes
-  roc_response <- c(in_vivo_minimal_df[[i]], post_warm_minimal_df[[i]])
-  
-  # Create a factor indicating the group of each value
-  roc_predictor <- factor(c(rep("minimal", nrow(in_vivo_minimal_df)), 
-                            rep("severe", nrow(post_warm_minimal_df))),
-                          levels=c("minimal", "severe"))
-  
-  # Compute the ROC curve and extract the AUC
-  roc_result <- roc(roc_predictor, roc_response)
-  return(roc_result$auc)
-})
-
-
-auc_metabolites <- read_xlsx("...path to file containing AUC data")
+# Import AUC values 
+auc_metabolites <- read_xlsx("...path to Excel file containing AUC data")
 auc_metabolites <- data.frame(auc_metabolites)
 auc_values <- auc_metabolites$Mean_AUC
 
@@ -107,14 +85,7 @@ sorted_decreased_df <- decreased_df %>%
 # Combine the sorted increased and decreased dataframes
 sorted_new_df <- rbind(sorted_increased_df, sorted_decreased_df)
 
-# Count the number of metabolites that show a significant increase and decrease
-#number_up_Ex_In <- sum(sorted_increased_df$Significant, na.rm = TRUE)
-#number_down_Ex_In <- sum(sorted_decreased_df$Significant, na.rm = TRUE)
-
-
-### ------------------ ###
-## --> OVERALL PLOT <-- ##
-### ------------------ ###
+###  OVERALL PLOT ###
 setwd(".../path")
 # Set up PDF output
 pdf("file name.pdf", width=21/2.54, height=6.4/2.54, bg="white")  # Convert cm to inches for PDF dimensions
@@ -129,19 +100,17 @@ axis(2, lwd=.5, las=1)
 ## Add confidence intervals
 arrows(1:nrow(sorted_new_df), sorted_new_df$CI_Lower,
        1:nrow(sorted_new_df), sorted_new_df$CI_Upper,
-       lwd=.1*1.2, length=0, col=ifelse(sorted_new_df$P_Adjust < .05, "black", rgb(0,0,0,.2)))  # Adjusted line width
+       lwd=.1*1.2, length=0, col=ifelse(sorted_new_df$P_Adjust < .05, "black", rgb(0,0,0,.2))) 
 
 # Calculate point sizes based on AUC values, scaling sizes up
 sorted_new_df$PointSize <- ifelse(sorted_new_df$AUC < 0.7, 0.4,
                                   ifelse(sorted_new_df$AUC < 0.8, 0.6,
-                                         ifelse(sorted_new_df$AUC < 0.9, 0.8, 1))) * 1.2  # Scale point sizes proportionally
+                                         ifelse(sorted_new_df$AUC < 0.9, 0.8, 1))) * 1.2
 
 # Function to add alpha value to a color
 add.alpha <- function(col, alpha=1, maxColorValue = 255){
   if(missing(col)) stop("Please provide a vector of colours.")
   if(alpha < 0 || alpha > 1) stop("Alpha should be between 0 and 1.")
-  
-  # Convert color to RGB and then to [0,1] range and add alpha
   apply(sapply(col, col2rgb)/maxColorValue, 2, 
         function(x) rgb(x[1], x[2], x[3], alpha=alpha))  
 }
@@ -161,9 +130,7 @@ legend("bottomright", lty=0, pch=21, pt.cex=c(0.4, 0.6, 0.8, 1) * 1.2, pt.bg="gr
        cex=.5*1.2, legend=c("<0.7", "0.7-<0.8", "0.8-<0.9", ">=0.9"), title = "AUC values",
        y.intersp = 1, x.intersp = 1.2, ncol=4, inset=c(0,0))
 
-
-
-## --> POSITIVE INLET <-- ##
+## POSITIVE ##
 par(tck=-.01, mar=c(1.5,14,.3,1) * 1.32, xaxs="i", mgp=c(.4,-0.2,0))
 
 # Select increased metabolites and take the top 10
@@ -178,15 +145,14 @@ pm <- par("usr")
 rect(pm[1], 1:nrow(positive_top10)-.5, pm[2], 1:nrow(positive_top10)+.5, col=c("grey90", "white"), border=NA)
 abline(v=0, lwd=.7 * 1.2, lty=2)  # Adjust line width
 # Add confidence intervals
-arrows(positive_top10$CI_Lower, 1:nrow(positive_top10), positive_top10$CI_Upper, 1:nrow(positive_top10), lwd=.5 * 1.2, length=0)  # Adjusted line width
+arrows(positive_top10$CI_Lower, 1:nrow(positive_top10), positive_top10$CI_Upper, 1:nrow(positive_top10), lwd=.5 * 1.2, length=0) 
 # Add point estimates
-points(positive_top10$CI_Mean, 1:nrow(positive_top10), pch=21, bg="#ED0000", lwd=.3 * 1.2, cex=positive_top10$PointSize)  # Adjust point sizes and line width
+points(positive_top10$CI_Mean, 1:nrow(positive_top10), pch=21, bg="#ED0000", lwd=.3 * 1.2, cex=positive_top10$PointSize)
 # Add metabolite names
-text(pm[1], 1:nrow(positive_top10), labels=positive_top10$Metabolite, offset=.2, pos=2, xpd=NA, cex=.45 * 1.2)  # Adjust text size
-rect(pm[1], pm[3], pm[2], pm[4], lwd=.5 * 1.2)  # Adjust line width
+text(pm[1], 1:nrow(positive_top10), labels=positive_top10$Metabolite, offset=.2, pos=2, xpd=NA, cex=.45 * 1.2)
+rect(pm[1], pm[3], pm[2], pm[4], lwd=.5 * 1.2) 
 
-## --> INVERSE INLET <-- ##
-
+## INVERSE ##
 par(tck=-.01, mar=c(1.5,2.5,.3,12.5) * 1.32, xaxs="i")
 
 # Select decreased metabolites and take the top 10
