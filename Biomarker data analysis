@@ -1,0 +1,46 @@
+# Load required libraries
+library(data.table)
+library(pROC)
+library(readxl)
+library(writexl)
+
+# Set working directory and seed
+setwd(".../path")
+set.seed(42)
+
+# Read data and extract relevant information
+data <- read_excel("Metabolon imputed data_bootstrap.xlsx", sheet = 1)
+sample_names <- as.character(data[[1]])
+pig_ids <- as.character(data[[2]])
+labels <- as.numeric(data[[3]])
+metabolite_data <- as.matrix(data[, 4:ncol(data)])
+mode(metabolite_data) <- "numeric"
+
+# Prepare for bootstrap
+unique_pigs <- unique(pig_ids)
+pig <- 1:length(unique_pigs)
+b.list <- lapply(1:100, function(x) sample(pig, 30, replace = TRUE))
+
+# Perform bootstrap analysis
+results <- lapply(b.list, function(x) {
+  train_pigs <- sample(x, 20)
+  test_pigs <- x[!(x %in% train_pigs)]
+  
+  train_idx <- which(pig_ids %in% unique_pigs[train_pigs])
+  test_idx <- which(pig_ids %in% unique_pigs[test_pigs])
+  
+  sapply(1:ncol(metabolite_data), function(i) {
+    tryCatch({
+      train_data <- data.frame(binary = labels[train_idx], metabolite = metabolite_data[train_idx, i])
+      model <- glm(binary ~ metabolite, data = train_data, family = binomial)
+      preds <- predict(model, newdata = data.frame(metabolite = metabolite_data[test_idx, i]), type = "response")
+      roc_obj <- roc(labels[test_idx], preds)
+      auc(roc_obj)
+    }, error = function(e) NA)
+  })
+})
+
+# Calculate mean AUCs and prepare results
+mean_aucs <- colMeans(do.call(rbind, results), na.rm = TRUE)
+results_df <- data.frame(Metabolite = colnames(metabolite_data), Mean_AUC = mean_aucs)
+results_df <- results_df[order(-results_df$Mean_AUC), ]
