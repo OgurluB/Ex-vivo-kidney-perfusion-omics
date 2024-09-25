@@ -1,4 +1,5 @@
 ### Fig. 5b, 6b, and 7b ###
+# The code used to make Figures 5b, 6b, and 7b are very similar with only minor differences (such as file names, pathway groups, colors, and breaks). Hence, with only minor adjustments the following code can be used to make all three Figures. 
 
 # Load required packages
 library(readxl)
@@ -30,32 +31,32 @@ NAD_df <- NAD_df[, 3:ncol(NAD_df)]
 protein_df <- protein_df[, 3:ncol(protein_df)]
 mrnas_df <- mrnas_df[, 3:ncol(mrnas_df)]
 
-port_mrna_df <- cbind(mrnas_df, protein_df)
-port_mrna_df <- data.frame(port_mrna_df)
+prot_mrna_df <- cbind(mrnas_df, protein_df)
+prot_mrna_df <- data.frame(prot_mrna_df)
 
 NAD_df <- data.frame(NAD_df)
 
-port_mrna_df[] <- lapply(port_mrna_df, function(x) as.numeric(as.character(x)))
-#sum(is.na(port_mrna_df))
+prot_mrna_df[] <- lapply(prot_mrna_df, function(x) as.numeric(as.character(x)))
+#sum(is.na(prot_mrna_df))
 
 # Setup parallel environment
 no_cores <- detectCores() - 2
 cl <- makeCluster(no_cores)
-clusterExport(cl, varlist = c("NAD_df", "port_mrna_df", "cor.test"))
+clusterExport(cl, varlist = c("NAD_df", "prot_mrna_df", "cor.test"))
 clusterEvalQ(cl, library(stats))
 
 # Prepare pairs of metabolite and Protein_mRNA for parallel computation
-params <- expand.grid(metabolite = colnames(NAD_df), Protein_mRNA = colnames(port_mrna_df))
+params <- expand.grid(metabolite = colnames(NAD_df), Protein_mRNA = colnames(prot_mrna_df))
 
 # Function to calculate correlation for a pair
 calc_cor <- function(param) {
   metabolite <- param$metabolite
   Protein_mRNA <- param$Protein_mRNA
   
-  if (any(is.na(NAD_df[[metabolite]])) || any(is.na(port_mrna_df[[Protein_mRNA]]))) {
+  if (any(is.na(NAD_df[[metabolite]])) || any(is.na(prot_mrna_df[[Protein_mRNA]]))) {
     return(NULL)
   } else {
-    test_result <- cor.test(NAD_df[[metabolite]], port_mrna_df[[Protein_mRNA]], method = "spearman")
+    test_result <- cor.test(NAD_df[[metabolite]], prot_mrna_df[[Protein_mRNA]], method = "spearman")
     return(data.frame(Metabolite = metabolite, 
                       Protein_mRNAs = Protein_mRNA, 
                       Correlation = test_result$estimate, 
@@ -64,41 +65,40 @@ calc_cor <- function(param) {
 }
 
 # Run calculations in parallel
-results_list <- parLapply(cl, split(params, seq(nrow(params))), calc_cor)
+results <- parLapply(cl, split(params, seq(nrow(params))), calc_cor)
 
 # Stop the parallel cluster
 stopCluster(cl)
 
 # Combine the results
-results_GMI <- do.call(rbind, results_list)
+results_2 <- do.call(rbind, results)
 
 # Remove 'NULL' entries
-results_GMI <- results_GMI[!sapply(results_GMI, is.null), ]
+results_2 <- results_2[!sapply(results_2, is.null), ]
 
-results_GMI$P_Adjust <- p.adjust(results_GMI$P_Value, method = "BH")
+results_2$P_Adjust <- p.adjust(results_2$P_Value, method = "BH")
 
-results_GMI$Significant <- results_GMI$P_Adjust < 0.05
+results_2$Significant <- results_2$P_Adjust < 0.05
 
-significant_GMIs <- results_GMI[results_GMI$Significant == TRUE, ]
+significant_results <- results_2[results_2$Significant == TRUE, ]
 
-significant_GMIs <- data.frame(significant_GMIs)
+significant_results <- data.frame(significant_results)
 
-write_xlsx(significant_GMIs, "significant_results_GMI_PMI.xlsx")
-significant_GMIs <- read_xlsx("significant_results_GMI.xlsx")
-significant_GMIs <- data.frame(significant_GMIs)
+write_xlsx(significant_results, "significant_results_2_PMI.xlsx")
+significant_results <- read_xlsx("significant_results_2.xlsx")
+significant_results <- data.frame(significant_results)
 
 # Divide the signififcant results in positive and negative correlations
-significant_GMIs$Positive <- significant_GMIs$Correlation > 0
-significant_GMIs_pos <- significant_GMIs[significant_GMIs$Positive == TRUE, ]
-significant_GMIs_neg <- significant_GMIs[significant_GMIs$Positive == FALSE, ]
+significant_results$Positive <- significant_results$Correlation > 0
+significant_results_pos <- significant_results[significant_results$Positive == TRUE, ]
+significant_results_neg <- significant_results[significant_results$Positive == FALSE, ]
 
 ## Start KEGG
-
-data <- significant_GMIs_pos
+# The following code should be ran for the positive and negative correlations seperately
+data <- significant_results_pos #or significant_results_neg
 
 # Initialize empty data frames for KEGG results
 KEGG_df <- data.frame()
-
 # Get the list of unique metabolites
 unique_metabolites <- unique(data$Metabolite)
 
@@ -109,11 +109,8 @@ for (metabolite in unique_metabolites) {
   
   # Convert Protein_mRNA names to Entrez IDs
   entrez_ids <- bitr(Protein_mRNAs, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
-  
-  # Filter out Protein_mRNAs that could not be converted
   valid_entrez_ids <- entrez_ids$ENTREZID[!is.na(entrez_ids$ENTREZID)]
   
-  # Skip this metabolite if there are no valid Entrez IDs
   if (length(valid_entrez_ids) == 0) {
     next
   }
@@ -144,23 +141,17 @@ KEGG_df <- KEGG_df %>%
 setwd(".../path")
 write_xlsx(KEGG_df, "file_name")
 
-### Data preparation for heatmap
+# Data preparation for heatmap
 setwd(".../path")
 KEGG <- read_xlsx("file_name")
 KEGG_df <- data.frame(KEGG)
-
 KEGG_df$NegLog_P_adjust <- -log10(KEGG_df$p.adjust)
-
-## Creating a new data frame 
-# Get unique pathway names and metabolites
 unique_pathways <- unique(KEGG_df$Name)
 unique_metabolites <- unique(KEGG_df$Metabolite)
 
 # Initialize Overview_df with 0's
 Overview_df <- expand.grid(Metabolite = unique_metabolites, Pathway = unique_pathways)
-Overview_df$NegLog_P_adjust <- 0  # Initialize all values to 0
-
-# Transform Overview_df to wide format
+Overview_df$NegLog_P_adjust <- 0
 Overview_df_wide <- Overview_df %>%
   pivot_wider(names_from = Pathway, values_from = NegLog_P_adjust, values_fill = list(NegLog_P_adjust = 0))
 
@@ -172,11 +163,11 @@ for (row in 1:nrow(KEGG_df)) {
   Overview_df_wide[Overview_df_wide$Metabolite == metabolite, pathway] <- neg_log_p_adjust
 }
 
-# Creating the new dataframe with unique descriptions and their first occurrence
+# Creating the new dataframe with unique descriptions
 meta_data_df <- KEGG_df %>%
   distinct(Name, .keep_all = TRUE)
 
-# Optional step to save the file
+# Save file
 #write_xlsx(meta_data_df, "file_name")
 
 heatmap_data_df <- data.frame(Overview_df_wide)
