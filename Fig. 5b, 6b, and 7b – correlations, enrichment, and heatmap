@@ -11,16 +11,16 @@ library(tidyr)
 library(pheatmap)
 
 # Set the working directory
-setwd("/Users/baranogurlu/Library/CloudStorage/OneDrive-UMCG/Multi-omics - shared/Metabolomics/Statistics and figures/Ex vivo vs in vivo/GMI")
+setwd(".../path")
 
 # Load data
-NAD <- read_xlsx("NAD_for_correlation.xlsx")
+NAD <- read_xlsx("file_name")
 NAD_df <- data.frame(NAD) 
 
-protein <- read_xlsx("/Users/baranogurlu/Library/CloudStorage/OneDrive-UMCG/Multi-omics - shared/Metabolomics/Statistics and figures/Ex vivo vs in vivo/Protein/Proteomics Ex vs In.xlsx")
+protein <- read_xlsx("file_name")
 protein_df <- data.frame(protein)
 
-mrnas <- read_xlsx("/Users/baranogurlu/Library/CloudStorage/OneDrive-UMCG/Multi-omics - shared/Metabolomics/Statistics and figures/Ex vivo vs in vivo/mRNA/mRNA Ex vs In.xlsx")
+mrnas <- read_xlsx("file_name")
 mrnas_df <- data.frame(mrnas)
 
 # Prepare data frames
@@ -81,10 +81,7 @@ significant_GMIs <- results_GMI[results_GMI$Significant == TRUE, ]
 
 significant_GMIs <- data.frame(significant_GMIs)
 
-
 write_xlsx(significant_GMIs, "significant_results_GMI_PMI.xlsx")
-
-
 significant_GMIs <- read_xlsx("significant_results_GMI.xlsx")
 significant_GMIs <- data.frame(significant_GMIs)
 
@@ -93,21 +90,17 @@ significant_GMIs$Positive <- significant_GMIs$Correlation > 0
 significant_GMIs_pos <- significant_GMIs[significant_GMIs$Positive == TRUE, ]
 significant_GMIs_neg <- significant_GMIs[significant_GMIs$Positive == FALSE, ]
 
-
-### --------------------------------###
-## -- Start KEGG & GO Enrichment -- ##
-### --------------------------------###
+## Start KEGG
 
 data <- significant_GMIs_pos
 
-# Initialize empty data frames for GO and KEGG results
-GO_df <- data.frame()
+# Initialize empty data frames for KEGG results
 KEGG_df <- data.frame()
 
 # Get the list of unique metabolites
 unique_metabolites <- unique(data$Metabolite)
 
-# Perform GO and KEGG analysis for each unique metabolite
+# Perform KEGG analysis for each unique metabolite
 for (metabolite in unique_metabolites) {
   # Extract all related Protein_mRNA names for this metabolite
   Protein_mRNAs <- data$Protein_mRNAs[data$Metabolite == metabolite]
@@ -123,14 +116,6 @@ for (metabolite in unique_metabolites) {
     next
   }
   
-  # GO analysis
-  go_results <- enrichGO(gene = valid_entrez_ids,
-                         OrgDb = org.Hs.eg.db,
-                         keyType = "ENTREZID",
-                         ont = "ALL",
-                         pAdjustMethod = "BH",
-                         qvalueCutoff = 0.05)
-  
   # KEGG analysis
   kegg_results <- enrichKEGG(gene = valid_entrez_ids,
                              organism = "hsa",
@@ -138,20 +123,13 @@ for (metabolite in unique_metabolites) {
                              pAdjustMethod = "BH",
                              qvalueCutoff = 0.05)
   
-  # Convert S4 object to data frame
-  if (!is.null(go_results) && nrow(go_results) > 0) {
-    go_df <- as.data.frame(go_results)
-    go_df$Metabolite <- metabolite  # Add the metabolite name
-    GO_df <- rbind(GO_df, go_df)
-  }
-  
+  # Convert to data frame
   if (!is.null(kegg_results) && nrow(kegg_results) > 0) {
     kegg_df <- as.data.frame(kegg_results)
     kegg_df$Metabolite <- metabolite  # Add the metabolite name
     KEGG_df <- rbind(KEGG_df, kegg_df)
   }
-  
-  
+   
   # Print message indicating completion
   print(paste("Completed analysis for", metabolite))
 }
@@ -159,42 +137,31 @@ for (metabolite in unique_metabolites) {
 KEGG_df <- KEGG_df %>%
   arrange(p.adjust)
 
-GO_df <- GO_df %>%
-  arrange(p.adjust)
+### End KEGG
 
-### --- End KEGG & GO --- ###
+setwd(".../path")
+write_xlsx(KEGG_df, "file_name")
 
-setwd("/Users/baranogurlu/Library/CloudStorage/OneDrive-UMCG/Multi-omics - shared/Metabolomics/Statistics and figures/Ex vivo vs in vivo/GMI/KEGG results")
-write_xlsx(KEGG_df, "kegg_df_NAD_PMI_GMI_pos.xlsx")
-
-setwd("/Users/baranogurlu/Library/CloudStorage/OneDrive-UMCG/Multi-omics - shared/Metabolomics/Statistics and figures/Ex vivo vs in vivo/GMI/GO results")
-write_xlsx(GO_df, "go_df_NAD_PMI_GMI_pos.xlsx")
-
-
-
-
-##########################################
-### -- Data preparation for heatmap -- ###
-setwd("/Users/baranogurlu/Library/CloudStorage/OneDrive-UMCG/Multi-omics - shared/Metabolomics/Statistics and figures/Ex vivo vs in vivo/GMI/KEGG results/PMI - GMI")
-KEGG <- read_xlsx("PMI-GMI Ex vs In_pos2.xlsx")
+### Data preparation for heatmap
+setwd(".../path")
+KEGG <- read_xlsx("file_name")
 KEGG_df <- data.frame(KEGG)
 
 KEGG_df$NegLog_P_adjust <- -log10(KEGG_df$p.adjust)
 
 ## Creating a new data frame 
-# Step 1: Get unique pathway names and metabolites
+# Get unique pathway names and metabolites
 unique_pathways <- unique(KEGG_df$Name)
 unique_metabolites <- unique(KEGG_df$Metabolite)
 
-# Step 2: Initialize Overview_df with 0's
+# Initialize Overview_df with 0's
 Overview_df <- expand.grid(Metabolite = unique_metabolites, Pathway = unique_pathways)
 Overview_df$NegLog_P_adjust <- 0  # Initialize all values to 0
 
-# Transform Overview_df to wide format for easy value assignment
+# Transform Overview_df to wide format
 Overview_df_wide <- Overview_df %>%
   pivot_wider(names_from = Pathway, values_from = NegLog_P_adjust, values_fill = list(NegLog_P_adjust = 0))
 
-# Step 3: Populate the dataframe
 for (row in 1:nrow(KEGG_df)) {
   metabolite <- KEGG_df$Metabolite[row]
   pathway <- KEGG_df$Name[row]
@@ -203,29 +170,19 @@ for (row in 1:nrow(KEGG_df)) {
   Overview_df_wide[Overview_df_wide$Metabolite == metabolite, pathway] <- neg_log_p_adjust
 }
 
-
 # Creating the new dataframe with unique descriptions and their first occurrence
-supp_mat_df <- KEGG_df %>%
+meta_data_df <- KEGG_df %>%
   distinct(Name, .keep_all = TRUE)
 
-#write_xlsx(supp_mat_df, "supp_mat_positive.xlsx")
-
-supp_mat_df <- read_xlsx("supp_mat_pos.xlsx")
-supp_mat_df <- data.frame(supp_mat_df)
+# Optional step to save the file
+#write_xlsx(meta_data_df, "file_name")
 
 heatmap_data_df <- data.frame(Overview_df_wide)
-
-#write_xlsx(heatmap_data_df, "heatmap_tijdelijk_pos.xlsx")
-heatmap_data_df <- read_xlsx("heatmap_tijdelijk_pos.xlsx")
-heatmap_data_df <- data.frame(heatmap_data_df)
-
-meta_data_df <- supp_mat_df
-
 rownames_phmat <- heatmap_data_df$Metabolite
 
 phmat <- heatmap_data_df[2:ncol(heatmap_data_df)]
 rownames(phmat) <- rownames_phmat
-colnames_phmat <- read_xlsx("Colnames_pos.xlsx")
+colnames_phmat <- read_xlsx("file_name")
 colnames_phmat <- data.frame(colnames_phmat)
 colnames(phmat) <- colnames_phmat
 
@@ -238,13 +195,13 @@ annot_col <- data.frame(meta_data_df$Group)
 colnames(annot_col)[1] <- "Pathway group"
 rownames(annot_col) <- meta_data_df$Name
 
-###########################
-## --> START HEATMAP <-- ##
-setwd("/Users/baranogurlu/Library/CloudStorage/OneDrive-UMCG/Multi-omics - shared/Metabolomics/Statistics and figures/Ex vivo vs in vivo/GMI/KEGG results/PMI - GMI")
-# Set up PDF output
-pdf("heatmap_PMI-GMI_positive_t_postfeedback.pdf", width=6.2, height = 10, bg = "white")
+## START HEATMAP
+setwd(".../path")
+pdf("file_name", width=6.2, height = 10, bg = "white")
 
-## Heatmap
+# Heatmap
+# Some details of the settings (such as pathway groups, colors, and breaks) can be slightly different depending on the figure (Fig. 5b, 6b, and 7b). 
+# Here, we show the settings of Fig. 5b
 ph <- phmat_trans %>% as.data.frame() %>% 
   pheatmap(cluster_rows = F, cluster_cols = F, clustering_method = "ward.D2",
            cutree_rows = 3, cutree_cols = 4,
@@ -259,8 +216,5 @@ ph <- phmat_trans %>% as.data.frame() %>%
                )),
            breaks = c(0,1.301,2,4,6,8,10),
            color = c("white", "#CCCCCC", "#B2B2B2", "#999999", "#7F7F7F", "#5F5F5F"))
-
-
-
 
 dev.off()
